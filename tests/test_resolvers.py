@@ -14,6 +14,14 @@ def test_station_resolver_case_insensitive():
     assert r(" mumbai ") == "CSTM"
 
 
+def test_station_resolver_pass_through_station_code():
+    r = StationResolver(DEFAULT_STATION_MAPPING)
+    # Mumbai Central code is not in the default alias mapping keys,
+    # so this asserts code-like pass-through works.
+    assert r("BCT") == "BCT"
+    assert r("bct") == "BCT"
+
+
 def test_train_class_resolver_aliases():
     r = TrainClassResolver(DEFAULT_TRAIN_CLASS_MAPPING)
     assert r("sleeper") == "SL"

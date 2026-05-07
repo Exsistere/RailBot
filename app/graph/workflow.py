@@ -49,8 +49,12 @@ from app.graph.nodes.logger_node import logger_node, set_interaction_service
 # Services + repositories
 from app.services.db.connection import db_manager
 from app.services.db.interaction_repository import InteractionRepository
+from app.services.db.pnr_repository import PNRRepository
 from app.services.db.tool_execution_repository import ToolExecutionRepository
+from app.services.db.user_pnr_repository import UserPNRRepository
 from app.services.railway_api_client import RailwayAPIClient
+from app.services.rag_service import RAGService
+from app.services.pnr_service import PNRService
 from app.services.train_service import TrainService
 from app.services.logging_service import LoggingService
 from app.services.interaction_service import InteractionService
@@ -78,12 +82,20 @@ def _build_services():
     # Repositories (depend on db_manager singleton)
     interaction_repo = InteractionRepository(db_manager)
     tool_execution_repo = ToolExecutionRepository(db_manager)
+    pnr_repo = PNRRepository(db_manager)
+    user_pnr_repo = UserPNRRepository(db_manager)
 
     # External clients
     api_client = RailwayAPIClient()
 
     # Services
     train_service = TrainService(api_client)
+    pnr_service = PNRService(
+        pnr_repo=pnr_repo,
+        user_pnr_repo=user_pnr_repo,
+        railway_api_client=api_client,
+    )
+    rag_service = RAGService()
     logging_service = LoggingService(interaction_repo, tool_execution_repo)
     interaction_service = InteractionService(logging_service)
 
@@ -94,15 +106,19 @@ def _build_services():
         cache_enabled=False,  # Caching hook available for future use
     )
 
-    return train_service, interaction_service, semantic_extractor
+    return train_service, pnr_service, rag_service, interaction_service, semantic_extractor
 
 
-def _build_tool_factory(train_service: TrainService) -> ToolFactory:
+def _build_tool_factory(
+    train_service: TrainService,
+    pnr_service: PNRService,
+    rag_service: RAGService,
+) -> ToolFactory:
     """Create the ToolFactory with all available services."""
     return ToolFactory(
         train_service=train_service,
-        # Add new service kwargs here for future tools:
-        # pnr_service=pnr_service,
+        pnr_service=pnr_service,
+        rag_service=rag_service,
     )
 
 
@@ -118,10 +134,10 @@ def compile_graph():
     and returns the final GraphState dict.
     """
     # 1 — Build services
-    train_service, interaction_service, semantic_extractor = _build_services()
+    train_service, pnr_service, rag_service, interaction_service, semantic_extractor = _build_services()
 
     # 2 — Inject dependencies into nodes that require them
-    tool_factory = _build_tool_factory(train_service)
+    tool_factory = _build_tool_factory(train_service, pnr_service, rag_service)
     set_tool_factory(tool_factory)
     set_interaction_service(interaction_service)
 

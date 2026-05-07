@@ -150,5 +150,8 @@ CREATE TABLE IF NOT EXISTS user_pnrs (
     created_at TIMESTAMP   NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_pnrs_user_id_pnr_id_unique
+    ON user_pnrs (user_id, pnr_id);
+
 CREATE INDEX IF NOT EXISTS idx_user_pnrs_user_id
     ON user_pnrs (user_id);

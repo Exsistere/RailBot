@@ -63,6 +63,10 @@ class UserPNRRepository(BaseRepository):
             logger.error("UserPNRRepository.add_pnr_for_user failed: %s", exc)
             return None
 
+    # Compatibility alias expected by new orchestration/service layer
+    def save_user_pnr(self, user_id: str, pnr_id: str) -> Optional[Dict[str, Any]]:
+        return self.add_pnr_for_user(user_id=user_id, pnr_id=pnr_id)
+
     def get_latest_for_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """
         Retrieve the most recently tracked PNR for a user.
@@ -90,6 +94,31 @@ class UserPNRRepository(BaseRepository):
         except Exception as exc:
             logger.error("UserPNRRepository.get_latest_for_user failed: %s", exc)
             return None
+
+    # Compatibility alias expected by new orchestration/service layer
+    def get_latest_pnr_for_user(self, user_id: str) -> Optional[Dict[str, Any]]:
+        return self.get_latest_for_user(user_id)
+
+    def exists(self, user_id: str, pnr_id: str) -> bool:
+        """Check whether a user->pnr relation already exists."""
+        if not self._db.is_available():
+            return False
+        try:
+            conn = self._db.get_connection()
+            row = self._fetch_one(
+                conn,
+                """
+                SELECT 1
+                FROM user_pnrs
+                WHERE user_id = %s AND pnr_id = %s
+                LIMIT 1
+                """,
+                (user_id, pnr_id),
+            )
+            return row is not None
+        except Exception as exc:
+            logger.error("UserPNRRepository.exists failed: %s", exc)
+            return False
 
     def get_all_for_user(self, user_id: str) -> List[Dict[str, Any]]:
         """

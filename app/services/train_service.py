@@ -52,6 +52,7 @@ class TrainService:
         origin: str = params.get("origin_station", "")
         destination: str = params.get("destination_station", "")
         travel_date: str = params.get("travel_date", "")
+        travel_day: Optional[str] = params.get("travel_day")
         train_class: Optional[str] = params.get("train_class")
         quota: Optional[str] = params.get("quota")
 
@@ -69,6 +70,7 @@ class TrainService:
             origin_station=origin,
             destination_station=destination,
             travel_date=travel_date,
+            travel_day=travel_day or "",
             train_class=train_class,
             quota=quota,
         )

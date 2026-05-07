@@ -60,6 +60,10 @@ Supported intents:
 - SEARCH_TRAINS: User wants to find trains between stations, check schedules, \
 availability, or routes. Keywords: trains, schedule, departure, arrival, route, \
 availability, from X to Y.
+- CHECK_PNR_STATUS: User wants to check booking/PNR status. \
+Keywords: pnr status, check pnr, booking status, ticket status, my latest pnr.
+- FAQ_RAG: User asks railway policy/help/FAQ guidance. \
+Keywords: refund policy, cancellation rules, tatkal rules, railway faq, platform guidance.
 - SMALL_TALK: Conversational greetings, pleasantries, or non-railway social phrases. \
 Examples: "hi", "hello", "hey", "good morning", "good evening", "how are you", \
 "thanks", "thank you", "bye", "okay", "great", "cool", "what can you do".
@@ -89,7 +93,7 @@ Respond with exactly this JSON format:
   ]
 }}
 
-Only use intent types from this list: ["SEARCH_TRAINS", "SMALL_TALK", "UNKNOWN"]"""
+Only use intent types from this list: ["SEARCH_TRAINS", "CHECK_PNR_STATUS", "FAQ_RAG", "SMALL_TALK", "UNKNOWN"]"""
 
 
 # ============================================================================
@@ -206,9 +210,11 @@ Common aliases and variations:
 Rules:
 - Extract ONLY information explicitly mentioned or clearly implied.
 - Do NOT hallucinate dates, stations, or other entities.
+- For `origin_station` and `destination_station`, prefer returning the **Indian Railways station code** (uppercase, e.g., "NDLS", "RJT", "ANND"). If the user provides a city name, return the corresponding station code (most common code) rather than the city name.
+  - If you are not confident about the mapping, return null for that field (do not guess).
 - If information is not present, use null in JSON.
 - Dates MUST be returned in ISO format YYYY-MM-DD when a date can be inferred.
-- Station values can be a station name or a station code (normalization happens later).
+- Station values MUST be station codes when possible; normalization happens later (resolver/canonicalization).
 
 Respond with ONLY a JSON object. No other text."""
 
@@ -221,8 +227,8 @@ Detected intent (context hint): {intent_hint}
 
 Respond with exactly this JSON format:
 {{
-  "origin_station": "station name/code or null",
-  "destination_station": "station name/code or null",
+  "origin_station": "station code (uppercase) or null",
+  "destination_station": "station code (uppercase) or null",
   "travel_date": "YYYY-MM-DD or null",
   "day_mentioned": "day name if user mentioned (e.g., monday) or null",
   "pnr_number": "PNR number or null",

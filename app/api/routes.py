@@ -102,6 +102,20 @@ def _resolve_response_type(
             return "TRAIN_LIST", data
         return "TEXT", None
 
+    if top_intent == "CHECK_PNR_STATUS":
+        pnr_result = tool_results.get("check_pnr_status", {})
+        data = pnr_result.get("data") if isinstance(pnr_result, dict) else None
+        if data:
+            return "PNR_STATUS", data.get("data", data)
+        return "PNR_STATUS", None
+
+    if top_intent == "FAQ_RAG":
+        rag_result = tool_results.get("faq_rag", {})
+        data = rag_result.get("data") if isinstance(rag_result, dict) else None
+        if data:
+            return "RAG_RESPONSE", data.get("data", data)
+        return "RAG_RESPONSE", None
+
     return "TEXT", None
 
 

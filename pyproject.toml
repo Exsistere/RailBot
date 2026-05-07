@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
     "python-jose[cryptography]>=3.5.0",
+    "qdrant-client>=1.10.0",
     "tenacity>=9.1.4",
     "typing-extensions>=4.9.0",
     "uvicorn[standard]>=0.29.0",

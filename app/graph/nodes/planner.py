@@ -66,8 +66,9 @@ logger = logging.getLogger(__name__)
 
 _INTENT_TO_STEPS: Dict[str, List[str]] = {
     "SEARCH_TRAINS": ["search_trains"],
+    "CHECK_PNR_STATUS": ["check_pnr_status"],
+    "FAQ_RAG": ["faq_rag"],
     "SMALL_TALK":    [],   # empty plan → Responder handles directly
-    # "CHECK_PNR_STATUS": ["check_pnr"],       ← future
     # "SEAT_AVAILABILITY": ["seat_availability"], ← future
 }
 

@@ -61,7 +61,7 @@ def parse_guardrail_response(data: Dict[str, Any]) -> Dict[str, Any]:
 # Intent classifier parser
 # ---------------------------------------------------------------------------
 
-_VALID_INTENTS = {"SEARCH_TRAINS", "SMALL_TALK", "UNKNOWN"}
+_VALID_INTENTS = {"SEARCH_TRAINS", "CHECK_PNR_STATUS", "FAQ_RAG", "SMALL_TALK", "UNKNOWN"}
 
 
 def parse_intent_response(data: Dict[str, Any]) -> List[Dict[str, Any]]:

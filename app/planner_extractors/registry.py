@@ -18,6 +18,7 @@ from __future__ import annotations
 from typing import Dict, Type
 
 from app.planner_extractors.base_extractor import BaseParamExtractor
+from app.planner_extractors.check_pnr_extractor import CheckPNRParamExtractor
 from app.planner_extractors.search_trains_extractor import SearchTrainsParamExtractor
 
 # Future extractors imported here:
@@ -25,6 +26,6 @@ from app.planner_extractors.search_trains_extractor import SearchTrainsParamExtr
 
 PARAM_EXTRACTOR_REGISTRY: Dict[str, Type[BaseParamExtractor]] = {
     "SEARCH_TRAINS": SearchTrainsParamExtractor,
-    # "CHECK_PNR_STATUS": CheckPNRParamExtractor,   ← add here only
+    "CHECK_PNR_STATUS": CheckPNRParamExtractor,
     # "SEAT_AVAILABILITY": SeatAvailabilityParamExtractor,
 }

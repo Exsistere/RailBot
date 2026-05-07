@@ -109,6 +109,21 @@ def responder_node(state: GraphState) -> Dict:
         }
 
     # ------------------------------------------------------------------
+    # Branch 3.5: Structured response passthrough for new tools
+    # ------------------------------------------------------------------
+    if top_intent == "CHECK_PNR_STATUS":
+        pnr_result = tool_results.get("check_pnr_status", {})
+        pnr_data = pnr_result.get("data") if isinstance(pnr_result, dict) else None
+        if pnr_data and pnr_data.get("message"):
+            return {"final_response": pnr_data.get("message")}
+
+    if top_intent == "FAQ_RAG":
+        rag_result = tool_results.get("faq_rag", {})
+        rag_data = rag_result.get("data") if isinstance(rag_result, dict) else None
+        if rag_data and rag_data.get("message"):
+            return {"final_response": rag_data.get("message")}
+
+    # ------------------------------------------------------------------
     # Branch 4: Happy path — format tool results using LLM
     # ------------------------------------------------------------------
     response = _format_response(tool_results, plan, user_query)

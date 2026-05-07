@@ -56,11 +56,23 @@ class StationResolver:
         if not station_text:
             return None
         
-        # Normalize: lowercase and strip whitespace
-        normalized = station_text.strip().lower()
-        
-        # Lookup in mapping
-        return self.station_mapping.get(normalized, None)
+        candidate = station_text.strip()
+        if not candidate:
+            return None
+
+        # Lookup in mapping (alias -> code)
+        normalized = candidate.lower()
+        resolved = self.station_mapping.get(normalized)
+        if resolved:
+            return resolved
+
+        # Pass-through: if LLM already returned a code-like value (e.g., NDLS),
+        # keep it so canonicalization doesn't discard it.
+        # Station codes are typically 2-5 alphanumeric uppercase strings.
+        if candidate.isalnum() and 2 <= len(candidate) <= 5:
+            return candidate.upper()
+
+        return None
 
 
 class TrainClassResolver:
@@ -167,7 +179,7 @@ DEFAULT_STATION_MAPPING: Dict[str, str] = {
     
     "surat": "ST",
     "surat station": "ST",
-    
+
     # Add more stations as needed
 }
 

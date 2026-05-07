@@ -18,6 +18,8 @@ import logging
 from typing import Dict, Type
 
 from app.tools.base_tool import BaseTool
+from app.tools.check_pnr_tool import CheckPNRTool
+from app.tools.faq_rag_tool import FAQRAGTool
 from app.tools.search_trains_tool import SearchTrainsTool
 
 # Future tools imported here:
@@ -35,7 +37,8 @@ logger = logging.getLogger(__name__)
 
 TOOL_REGISTRY: Dict[str, Type[BaseTool]] = {
     "search_trains": SearchTrainsTool,
-    # "check_pnr":    CheckPNRTool,    ← future: add here only
+    "check_pnr_status": CheckPNRTool,
+    "faq_rag": FAQRAGTool,
     # "book_ticket":  BookTicketTool,  ← future: add here only
 }
 

@@ -6,6 +6,8 @@ Uses st.chat_message / st.chat_input for native chat layout.
 Dispatches rendering based on response_type from backend:
   - TEXT       → plain chat bubble
   - TRAIN_LIST → visual train cards
+  - PNR_STATUS → PNR status card
+  - RAG_RESPONSE → grounded FAQ response
   - ERROR      → styled error message
 
 Run with:  streamlit run frontend/app.py
@@ -303,6 +305,37 @@ def render_train_cards(data: dict) -> None:
         st.markdown(card_html, unsafe_allow_html=True)
 
 
+def render_pnr_card(data: dict) -> None:
+    """Render a compact PNR status card."""
+    pnr = data.get("PNR", "—")
+    status = data.get("status", "—")
+    train = (data.get("train") or [{}])[0]
+    passengers = data.get("passengers") or []
+    pax_status = passengers[0].get("currentStatus") if passengers else "—"
+    st.markdown(
+        f"""
+        <div class="train-card">
+            <div class="train-card-header">
+                <div>
+                    <div class="train-name">🧾 PNR {pnr}</div>
+                    <div class="train-number">{train.get('trainName', 'Train details unavailable')}</div>
+                </div>
+                <div style="text-align:right;">
+                    <div class="train-timing">Status: {status}</div>
+                    <div class="train-duration">Passenger: {pax_status}</div>
+                </div>
+            </div>
+            <div class="train-meta">
+                <span class="meta-pill pill-class">🚆 {train.get('trainNumber', '—')}</span>
+                <span class="meta-pill pill-days">📍 {train.get('sourceStation', '—')} → {train.get('destinationStation', '—')}</span>
+                <span class="meta-pill pill-fare">🗓 {train.get('dateOfJourney', '—')}</span>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Message rendering
 # ---------------------------------------------------------------------------
@@ -320,6 +353,14 @@ def render_message(msg: dict) -> None:
             st.markdown(content)
             # Then visual cards
             render_train_cards(data)
+        elif role == "assistant" and response_type == "PNR_STATUS" and data:
+            st.markdown(content)
+            render_pnr_card(data)
+        elif role == "assistant" and response_type == "RAG_RESPONSE":
+            st.markdown(content)
+            sources = (data or {}).get("sources", [])
+            if sources:
+                st.caption("Sources: " + ", ".join([str(s) for s in sources]))
         elif role == "assistant" and response_type == "ERROR":
             st.markdown(
                 f'<div class="error-msg">{content}</div>',
