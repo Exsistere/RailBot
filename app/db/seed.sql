@@ -1,0 +1,6 @@
+-- =============================================================================
+-- RailYatri — Seed Data
+--
+-- This file is intentionally empty at baseline.
+-- Add development/test fixture data here as needed.
+-- =============================================================================
