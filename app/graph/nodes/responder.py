@@ -1,19 +1,19 @@
 """
-Node [Re] — Responder Node.
+Node [Re] — Universal Responder Node.
 
 Synthesises tool_results into a coherent natural-language response.
 
-Response strategy is driven by top_intent from GraphState.intents:
-  - SMALL_TALK  → friendly conversational reply (no tool data expected)
-  - UNKNOWN     → helpful capability hint
-  - SEARCH_TRAINS (happy path) → LLM-formatted train results
-  - SEARCH_TRAINS (all failed) → graceful failure message
-  - is_safe=False → echo Guardrail refusal
+NEW FLOW (Shared Context Based):
+  - Reads shared_context for semantic understanding
+  - Reads tool_results for execution data
+  - Uses universal LLM prompt (no tool-specific branching)
+  - Supports multi-tool workflows naturally
+  - Future tools require ZERO responder changes
 
 Owned state mutations: final_response ONLY.
 
-Implementation: Uses LLM via centralised service for response generation.
-Falls back to template-based responses on LLM failure.
+Design: Universal synthesis instead of tool-specific branches.
+All synthesis logic lives in LLM prompts, not Python branching.
 """
 
 from __future__ import annotations
@@ -23,13 +23,11 @@ import logging
 import random
 from typing import Any, Dict, List, Optional
 
-from app.models.state import GraphState, Intent, PlanStep
+from app.models.state import GraphState, Intent
 from app.services.llm import client as llm_client
 from app.services.llm.prompts import (
-    RESPONDER_SYSTEM_PROMPT,
-    RESPONDER_USER_PROMPT_TEMPLATE,
-    FAQ_RAG_RESPONDER_SYSTEM_PROMPT,
-    FAQ_RAG_RESPONDER_USER_PROMPT_TEMPLATE,
+    UNIVERSAL_RESPONDER_SYSTEM_PROMPT,
+    UNIVERSAL_RESPONDER_USER_PROMPT_TEMPLATE,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,7 +56,12 @@ def responder_node(state: GraphState) -> Dict:
     """
     Generate the final natural-language response.
 
-    Branches explicitly on top_intent — not just on empty tool_results.
+    NEW FLOW:
+      1. Check safety status — echo Guardrail refusal if unsafe
+      2. Check for SMALL_TALK — return friendly reply
+      3. Check for empty plan — return capability hint
+      4. Check for all-failed plan — return failure message
+      5. UNIVERSAL PATH — LLM synthesis for all other cases
 
     Returns a partial state dict.
     Mutates ONLY: final_response
@@ -73,10 +76,10 @@ def responder_node(state: GraphState) -> Dict:
 
     intents: List[Intent] = state.get("intents", [])
     top_intent: str = intents[0]["type"] if intents else "UNKNOWN"
-
-    plan: List[PlanStep] = state.get("plan", [])
-    tool_results: Dict[str, Any] = state.get("tool_results", {})
     user_query: str = state.get("user_query", "")
+    plan: List[Dict] = state.get("plan", [])
+    tool_results: Dict[str, Any] = state.get("tool_results", {})
+    shared_context = state.get("shared_context")
 
     logger.info(
         "Responder: top_intent=%s plan_len=%d tool_results_keys=%s",
@@ -109,7 +112,7 @@ def responder_node(state: GraphState) -> Dict:
     # ------------------------------------------------------------------
     # Branch 3: All tool steps FAILED
     # ------------------------------------------------------------------
-    all_failed = all(step.get("status") == "FAILED" for step in plan)
+    all_failed = all(step.get("status") == "FAILED" for step in plan if step.get("status"))
     if all_failed:
         logger.warning("Responder: all plan steps FAILED")
         return {
@@ -121,37 +124,14 @@ def responder_node(state: GraphState) -> Dict:
         }
 
     # ------------------------------------------------------------------
-    # Branch 3.5: Structured response passthrough for new tools
+    # Branch 4: UNIVERSAL SYNTHESIS PATH
     # ------------------------------------------------------------------
-    if top_intent == "CHECK_PNR_STATUS":
-        pnr_result = tool_results.get("check_pnr_status", {})
-        pnr_data = pnr_result.get("data") if isinstance(pnr_result, dict) else None
-        if pnr_data and pnr_data.get("message"):
-            return {"final_response": pnr_data.get("message")}
-
-    if top_intent == "FAQ_RAG":
-        rag_result = tool_results.get("faq_rag", {})
-        rag_data = rag_result.get("data") if isinstance(rag_result, dict) else None
-        logger.info(
-            "Responder: FAQ_RAG tool data present=%s",
-            bool(rag_data),
-        )
-        if rag_data:
-            inner_data = rag_data.get("data", {})
-            chunks = inner_data.get("chunks", [])
-            logger.info(
-                "Responder: FAQ_RAG chunks=%d sample=%r",
-                len(chunks),
-                chunks[0].get("text", "")[:200] if chunks else "",
-            )
-            response = _format_faq_rag_response(user_query, chunks)
-            logger.info("Responder: FAQ_RAG final_response=%r", response)
-            return {"final_response": response}
-
-    # ------------------------------------------------------------------
-    # Branch 4: Happy path — format tool results using LLM
-    # ------------------------------------------------------------------
-    response = _format_response(tool_results, plan, user_query)
+    # Use shared_context + tool_results for universal synthesis
+    response = _synthesize_response(
+        query=user_query,
+        shared_context=shared_context,
+        tool_results=tool_results,
+    )
     logger.info("Responder: generated final_response (%d chars)", len(response))
     return {"final_response": response}
 
@@ -181,158 +161,155 @@ def _get_small_talk_reply(query: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Response formatting — LLM-powered with template fallback
+# Universal Response Synthesis — LLM-powered
 # ---------------------------------------------------------------------------
 
-def _format_response(
+def _synthesize_response(
+    query: str,
+    shared_context: Optional[Any],
     tool_results: Dict[str, Any],
-    plan: List[PlanStep],
-    user_query: str,
 ) -> str:
-    """Format tool results into a human-readable response using LLM."""
+    """
+    Synthesize a universal response from shared_context and tool_results.
 
-    results_str = json.dumps(tool_results, indent=2, default=str)
+    Uses LLM to intelligently combine tool outputs without branching logic.
+    Falls back to fallback formatting if LLM fails.
+    """
+    # Extract context fields
+    origin = ""
+    destination = ""
+    travel_date = ""
+    train_class = ""
+    quota = ""
+    pnr_number = ""
+    executed_tools = []
+    failed_tools = []
+    retrieved_chunks = []
+
+    if shared_context:
+        origin = shared_context.origin_station or ""
+        destination = shared_context.destination_station or ""
+        travel_date = shared_context.travel_date or ""
+        train_class = shared_context.train_class or ""
+        quota = shared_context.quota or ""
+        pnr_number = shared_context.pnr_number or ""
+        executed_tools = shared_context.executed_tools or []
+        failed_tools = shared_context.failed_tools or []
+        retrieved_chunks = shared_context.retrieved_knowledge_chunks or []
+
+    # Format tool results for prompt
+    tool_results_json = json.dumps(tool_results, indent=2, default=str) if tool_results else "{}"
+
+    # Format retrieved chunks
+    chunks_text = ""
+    if retrieved_chunks:
+        chunk_strs = []
+        for chunk in retrieved_chunks[:3]:  # Limit to first 3 chunks
+            text = chunk.get("text", "").strip()
+            source = chunk.get("source", "FAQ")
+            if text:
+                chunk_strs.append(f"({source}) {text[:300]}")
+        chunks_text = "\n".join(chunk_strs) if chunk_strs else "No chunks retrieved"
+    else:
+        chunks_text = "No FAQ chunks retrieved"
 
     try:
-        prompt = RESPONDER_USER_PROMPT_TEMPLATE.format(
-            query=user_query,
-            tool_results=results_str,
+        prompt = UNIVERSAL_RESPONDER_USER_PROMPT_TEMPLATE.format(
+            query=query,
+            origin_station=origin,
+            destination_station=destination,
+            travel_date=travel_date,
+            train_class=train_class,
+            quota=quota,
+            pnr_number=pnr_number,
+            tool_results_json=tool_results_json,
+            retrieved_chunks=chunks_text,
+            executed_tools=", ".join(executed_tools) if executed_tools else "none",
+            failed_tools=", ".join(failed_tools) if failed_tools else "none",
         )
-        response = llm_client.generate_text(prompt, system_prompt=RESPONDER_SYSTEM_PROMPT)
+
+        response = llm_client.generate_text(
+            prompt,
+            system_prompt=UNIVERSAL_RESPONDER_SYSTEM_PROMPT
+        )
 
         if response and len(response) > 10:
             return response
 
         logger.warning("Responder: LLM returned empty/short response — using fallback")
-        return _fallback_format(tool_results)
+        return _fallback_synthesis(tool_results, executed_tools, failed_tools)
 
     except Exception as exc:
-        logger.error("Responder: LLM call failed — using template fallback: %s", exc)
-        return _fallback_format(tool_results)
+        logger.error("Responder: LLM synthesis failed — using fallback: %s", exc)
+        return _fallback_synthesis(tool_results, executed_tools, failed_tools)
 
 
 # ---------------------------------------------------------------------------
-# Fallback formatting — template-based (used when LLM fails)
+# Fallback synthesis when LLM fails
 # ---------------------------------------------------------------------------
 
-def _fallback_format(tool_results: Dict[str, Any]) -> str:
-    """Template-based fallback when LLM is unavailable."""
+def _fallback_synthesis(
+    tool_results: Dict[str, Any],
+    executed_tools: List[str],
+    failed_tools: List[str],
+) -> str:
+    """
+    Fallback response when universal LLM synthesis fails.
 
+    Formats available tool results plainly without complex logic.
+    """
+    if not tool_results:
+        return "I couldn't find any information matching your query. Please try again."
+
+    # Try to extract train search results
     search_result = tool_results.get("search_trains", {})
-    data = search_result.get("data") if search_result else None
-
-    if data:
+    if search_result.get("status") == "SUCCESS":
+        data = search_result.get("data", {})
         trains = data.get("trains", [])
         total = data.get("total", 0)
         echoed = data.get("query_echoed", {})
 
         if total == 0:
             return (
-                f"No trains found from **{echoed.get('origin', '?')}** "
-                f"to **{echoed.get('destination', '?')}** "
-                f"on {echoed.get('date', '?')}.\n\n"
-                "Try a different date or nearby stations."
+                f"No trains found from {echoed.get('origin', '?')} "
+                f"to {echoed.get('destination', '?')} "
+                f"on {echoed.get('date', '?')}. Try a different date or nearby stations."
             )
 
         lines = [
-            f"Found **{total} train(s)** from "
+            f"Found {total} train(s) from "
             f"{echoed.get('origin', '?')} → {echoed.get('destination', '?')} "
             f"on {echoed.get('date', '?')}:\n"
         ]
 
-        for i, train in enumerate(trains, start=1):
+        for i, train in enumerate(trains[:5], start=1):
             avail = train.get("availability", {})
-            status_str = avail.get("status", "N/A")
             fare = avail.get("fare_inr", "N/A")
-            days = ", ".join(train.get("days_of_run", []))
-
             lines.append(
-                f"{i}. **{train.get('train_name')} ({train.get('train_number')})**\n"
-                f"   🕐 {train.get('departure_time')} → {train.get('arrival_time')} "
+                f"{i}. {train.get('train_name')} ({train.get('train_number')})\n"
+                f"   {train.get('departure_time')} → {train.get('arrival_time')} "
                 f"({train.get('duration')})\n"
-                f"   Class: {avail.get('class', 'N/A')} | Status: {status_str} | "
-                f"Fare: ₹{fare}\n"
-                f"   Runs on: {days}\n"
+                f"   {avail.get('class', 'N/A')} | {avail.get('status', 'N/A')} | ₹{fare}\n"
             )
 
         return "\n".join(lines)
 
-    if tool_results:
-        summaries = []
-        for step_name, result in tool_results.items():
-            if result.get("status") == "SUCCESS":
-                summaries.append(f"✅ {step_name}: completed successfully.")
-            else:
-                summaries.append(f"⚠️ {step_name}: {result.get('error', 'failed')}.")
-        return "\n".join(summaries)
+    # Try PNR result
+    pnr_result = tool_results.get("check_pnr_status", {})
+    if pnr_result.get("status") == "SUCCESS":
+        data = pnr_result.get("data", {})
+        if data:
+            return data.get("message", "PNR information retrieved successfully.")
 
-    return "I couldn't find any information matching your query. Please try again."
+    # Fallback: generic tool summary
+    summaries = []
+    for tool_name in executed_tools:
+        summaries.append(f"✅ {tool_name}: completed")
+    for tool_name in failed_tools:
+        summaries.append(f"⚠️ {tool_name}: failed")
 
+    if summaries:
+        return "Tool execution summary:\n" + "\n".join(summaries)
 
-def _format_faq_rag_response(user_query: str, chunks: List[Dict[str, Any]]) -> str:
-    """
-    Generate grounded FAQ answer from retrieved chunks.
-    """
-    if not chunks:
-        return "I don't have that knowledge in my internal FAQ index yet."
-    retrieved_context = "\n\n".join(
-        [
-            f"- Source: {c.get('source', 'internal_faq')}\n  Content: {c.get('text', '')}"
-            for c in chunks
-            if c.get("text")
-        ]
-    )
-    if not retrieved_context.strip():
-        return "I don't have that knowledge in my internal FAQ index yet."
-    try:
-        prompt = FAQ_RAG_RESPONDER_USER_PROMPT_TEMPLATE.format(
-            query=user_query,
-            retrieved_chunks=retrieved_context,
-        )
-        logger.info(
-            "Responder: FAQ_RAG prompt built with %d chunks; sample context=%r",
-            len(chunks),
-            retrieved_context[:300],
-        )
-        logger.info("Responder: FAQ_RAG full prompt length=%d", len(prompt))
-        logger.debug("Responder: FAQ_RAG full prompt: %s", prompt)
-        response = llm_client.generate_text(
-            prompt=prompt,
-            system_prompt=FAQ_RAG_RESPONDER_SYSTEM_PROMPT,
-        )
-        response = (response or "").strip()
-        no_knowledge_phrase = "i don't have that knowledge in my internal faq index yet"
-        if response and len(response) > 10 and no_knowledge_phrase not in response.lower():
-            return response
+    return "Your request was processed but no results were available."
 
-        logger.warning(
-            "Responder: FAQ_RAG LLM returned empty/short/no-knowledge response — using chunk fallback"
-        )
-        logger.debug("Responder: FAQ_RAG prompt: %s", prompt)
-        logger.debug("Responder: FAQ_RAG response: %r", response)
-        return _fallback_faq_rag_response(chunks)
-    except Exception as exc:
-        logger.error("Responder: FAQ_RAG response generation failed: %s", exc)
-        return _fallback_faq_rag_response(chunks)
-
-
-def _fallback_faq_rag_response(chunks: List[Dict[str, Any]]) -> str:
-    """Fallback response when FAQ RAG LLM generation fails or returns nothing."""
-    if not chunks:
-        return "I don't have that knowledge in my internal FAQ index yet."
-
-    bullet_lines = []
-    for chunk in chunks[:3]:
-        text = chunk.get("text", "").strip()
-        if not text:
-            continue
-        source = chunk.get("source", "internal_faq")
-        snippet = text.replace("\n", " ")
-        if len(snippet) > 200:
-            snippet = snippet[:197].rstrip() + "..."
-        bullet_lines.append(f"- ({source}) {snippet}")
-
-    if not bullet_lines:
-        return "I don't have that knowledge in my internal FAQ index yet."
-
-    return "I found relevant information in the FAQ content:\n" + "\n".join(bullet_lines)

@@ -1,5 +1,15 @@
 """
-FAQRAGTool — concrete tool for "faq_rag" step.
+FAQRAGTool — Context enrichment tool for FAQ/policy retrieval.
+
+DESIGN:
+  - Retrieves FAQ/policy chunks from Qdrant
+  - Stores chunks in shared_context.retrieved_knowledge_chunks
+  - Does NOT generate final answers (responder does that)
+  - Enables RAG-aware response generation across all tools
+
+Memory updates:
+  - Appends retrieved chunks to shared_context
+  - Responder synthesizes answers using chunks
 """
 
 from __future__ import annotations
@@ -15,7 +25,17 @@ logger = logging.getLogger(__name__)
 
 
 class FAQRAGTool(BaseTool):
-    """Thin tool wrapper around RAGService."""
+    """
+    FAQ/Policy retrieval and context enrichment tool.
+
+    Behavior:
+      1. Retrieve chunks from Qdrant based on user query
+      2. Return structured chunk data
+      3. Append chunks to shared_context via memory_updates
+
+    This tool is a CONTEXT ENRICHMENT TOOL, not an answer generator.
+    The responder uses chunks + other tool results to synthesize final answer.
+    """
 
     def __init__(self, rag_service: RAGService) -> None:
         self._rag_service = rag_service
@@ -39,18 +59,44 @@ class FAQRAGTool(BaseTool):
                 sample_text[:200],
             )
             for i, chunk in enumerate(chunks):
-                logger.debug("FAQRAGTool: chunk %d (source=%s): %s...", i+1, chunk.get("source", "unknown"), chunk.get("text", "")[:100])
+                logger.debug(
+                    "FAQRAGTool: chunk %d (source=%s): %s...",
+                    i + 1,
+                    chunk.get("source", "unknown"),
+                    chunk.get("text", "")[:100],
+                )
         else:
             logger.info("FAQRAGTool: retrieved 0 chunks")
         return raw_data
 
     def _process(self, raw_data: Dict[str, Any], state: GraphState) -> Dict[str, Any]:
+        """
+        Normalize RAG retrieval output.
+
+        Returns structured chunk data (no answer generation).
+        """
+        chunks = raw_data.get("chunks", [])
         return {
             "message": "",
-            "response_type": "RAG_RESPONSE",
+            "response_type": "RAG_CONTEXT",  # Not a final answer
             "data": {
-                "chunks": raw_data.get("chunks", []),
+                "chunks": chunks,
                 "sources": raw_data.get("sources", []),
             },
         }
+
+    def _get_memory_updates(self, result: Any, state: GraphState) -> Dict[str, Any]:
+        """
+        Return memory updates to append chunks to shared_context.
+
+        This enables the responder and other tools to access retrieved chunks.
+        """
+        data = result.get("data", {}) if isinstance(result, dict) else {}
+        chunks = data.get("chunks", [])
+
+        if chunks:
+            logger.debug(f"FAQRAGTool: appending {len(chunks)} chunks to shared_context")
+            return {"append_chunks": chunks}
+
+        return {}
 

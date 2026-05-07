@@ -5,15 +5,27 @@ Every concrete tool MUST:
   1. Inherit from BaseTool
   2. Implement _validate, _fetch_data, _process
   3. Optionally override _persist (default: no-op)
+  4. Optionally override _get_memory_updates (default: {})
 
 Tools MUST NOT:
   - Raise exceptions to the graph (all caught inside execute())
   - Call other nodes
   - Contain orchestration logic
-  - Re-parse user_query (use plan[i].params set by Planner)
+  - Re-parse user_query (use SharedContext or plan[i].params)
+
+SHARED CONTEXT INTEGRATION:
+  - Tools should read from state.shared_context when available
+  - Tools should return memory_updates for tool_node to merge
+  - Memory updates enable multi-tool workflows and context enrichment
 
 execute() always returns the standardised tool_result envelope:
-    { "status": "SUCCESS"|"FAILED", "data": any, "error": str|None }
+    {
+        "status": "SUCCESS"|"FAILED",
+        "data": <output>,
+        "memory_updates": <dict>,
+        "error": str|None,
+        "metadata": <dict>
+    }
 """
 
 from __future__ import annotations
@@ -59,7 +71,9 @@ class BaseTool(ABC):
             {
                 "status": "SUCCESS" | "FAILED",
                 "data": <tool output> | None,
-                "error": None | "<error message>"
+                "memory_updates": {} | <dict>,
+                "error": None | "<error message>",
+                "metadata": {}
             }
 
         Never raises — all exceptions are caught and wrapped.
@@ -69,24 +83,31 @@ class BaseTool(ABC):
             raw_data = self._fetch_data(state)
             processed = self._process(raw_data, state)
             self._persist(processed, state)
+            memory_updates = self._get_memory_updates(processed, state)
             return {
                 "status": "SUCCESS",
                 "data": processed,
+                "memory_updates": memory_updates,
                 "error": None,
+                "metadata": {"tool": self.__class__.__name__},
             }
         except ToolValidationError as exc:
             logger.warning("%s validation failed: %s", self.__class__.__name__, exc)
             return {
                 "status": "FAILED",
                 "data": None,
+                "memory_updates": {},
                 "error": f"Validation error: {exc}",
+                "metadata": {"tool": self.__class__.__name__},
             }
         except Exception as exc:
             logger.error("%s execution failed: %s", self.__class__.__name__, exc, exc_info=True)
             return {
                 "status": "FAILED",
                 "data": None,
+                "memory_updates": {},
                 "error": str(exc),
+                "metadata": {"tool": self.__class__.__name__},
             }
 
     # ------------------------------------------------------------------
@@ -115,7 +136,7 @@ class BaseTool(ABC):
         """
 
     # ------------------------------------------------------------------
-    # Optional hook — override only if tool has write side-effects
+    # Optional hooks — override only when needed
     # ------------------------------------------------------------------
 
     def _persist(self, result: Any, state: GraphState) -> None:
@@ -123,3 +144,16 @@ class BaseTool(ABC):
         Persist result to DB / cache if needed.
         Default: no-op. Override in tools with write side-effects.
         """
+
+    def _get_memory_updates(self, result: Any, state: GraphState) -> Dict[str, Any]:
+        """
+        Return memory updates for SharedContext merging.
+
+        Default: empty dict (no memory updates).
+        Override in tools that enrich SharedContext.
+
+        Returns:
+            Dict matching MemoryUpdate fields (all fields optional)
+            Example: {"train_number": "12345", "waitlist_detected": True}
+        """
+        return {}

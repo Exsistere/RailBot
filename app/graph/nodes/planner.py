@@ -57,6 +57,7 @@ from app.nlp.station_resolver import (
     DEFAULT_TRAIN_CLASS_MAPPING,
     DEFAULT_QUOTA_MAPPING,
 )
+from app.shared_context import SharedContextExtractor
 
 logger = logging.getLogger(__name__)
 
@@ -75,22 +76,25 @@ _INTENT_TO_STEPS: Dict[str, List[str]] = {
 
 def planner_node(
     state: GraphState,
-    semantic_extractor: Optional[SemanticExtractor] = None
+    semantic_extractor: Optional[SemanticExtractor] = None,
+    shared_context_extractor: Optional[SharedContextExtractor] = None,
 ) -> Dict:
     """
     Build an execution plan from the top-ranked intent.
     
-    NEW FLOW:
-      1. Extract semantic context from query (ONE LLM call)
-      2. Canonicalize semantic context
-      3. Extract intent-specific parameters (deterministic only)
-      4. Create execution plan
+    FLOW:
+      1. Extract shared_context from query (collaborative memory)
+      2. Extract semantic context from query (legacy compatibility)
+      3. Create execution plan from intent
+      4. Return plan + shared_context
 
     Returns a partial state dict.
-    Mutates: plan, current_step_index, semantic_context
+    Mutates: plan, current_step_index, semantic_context, shared_context
     """
     intents: List[Intent] = state.get("intents", [])
     user_query: str = state.get("user_query", "")
+    user_id: Optional[str] = state.get("user_id")
+    conversation_id: Optional[str] = state.get("conversation_id")
 
     if not intents:
         logger.warning("Planner: no intents provided — producing empty plan")
@@ -98,9 +102,11 @@ def planner_node(
             "plan": [],
             "current_step_index": 0,
             "semantic_context": None,
+            "shared_context": None,
         }
 
     top_intent = intents[0]["type"]
+    intent_names = [i["type"] for i in intents]
     step_names = _INTENT_TO_STEPS.get(top_intent, [])
 
     # Log SMALL_TALK and UNKNOWN explicitly
@@ -110,6 +116,7 @@ def planner_node(
             "plan": [],
             "current_step_index": 0,
             "semantic_context": None,
+            "shared_context": None,
         }
 
     if not step_names:
@@ -118,10 +125,35 @@ def planner_node(
             "plan": [],
             "current_step_index": 0,
             "semantic_context": None,
+            "shared_context": None,
         }
 
     # =====================================================================
-    # NEW: Semantic Extraction (ONE LLM call per query)
+    # NEW: Build Shared Context (ONE LLM call for collaborative memory)
+    # =====================================================================
+    shared_context = None
+    if shared_context_extractor is not None:
+        try:
+            shared_context = shared_context_extractor.extract(
+                query=user_query,
+                user_id=user_id,
+                session_id=conversation_id,
+                intent_hints=intent_names,
+            )
+            logger.info(
+                f"Planner: extracted shared_context with "
+                f"origin={shared_context.origin_station}, "
+                f"dest={shared_context.destination_station}, "
+                f"date={shared_context.travel_date}"
+            )
+        except Exception as exc:
+            logger.error(f"Planner: shared_context extraction failed: {exc}")
+            shared_context = None
+    else:
+        logger.debug("Planner: SharedContextExtractor not injected — skipping shared_context")
+
+    # =====================================================================
+    # LEGACY: Semantic Extraction (ONE LLM call per query)
     # =====================================================================
     
     if semantic_extractor is None:
@@ -130,6 +162,7 @@ def planner_node(
             "plan": [],
             "current_step_index": 0,
             "semantic_context": None,
+            "shared_context": shared_context,
         }
     
     # Extract semantic entities (ONE LLM call)
@@ -190,6 +223,7 @@ def planner_node(
         "plan": plan,
         "current_step_index": 0,
         "semantic_context": semantic_context,
+        "shared_context": shared_context,
     }
 
 

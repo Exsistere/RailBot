@@ -16,6 +16,11 @@ try:
 except ImportError:
     SemanticContext = Any  # Fallback if NLP module not yet available
 
+try:
+    from app.shared_context import SharedContext
+except ImportError:
+    SharedContext = Any  # Fallback if shared_context module not yet available
+
 
 # ---------------------------------------------------------------------------
 # Sub-schemas
@@ -81,12 +86,20 @@ class GraphState(TypedDict, total=False):
     # -- Intent Classifier Node --
     intents: List[Intent]                        # Sorted by confidence DESC
 
+    # -- Shared Context (Conversational / Semantic Memory) --
+    shared_context: Optional[SharedContext]      # WRITE-ONCE collaborative memory populated by SharedContextExtractor
+                                                  # Contains: query understanding, railway entities, derived knowledge
+                                                  # Evolved through tool memory_updates via merge_shared_context
+                                                  # Replaces tool-specific param passing
+                                                  # READ-ONLY after creation for all nodes
+
     # -- Semantic Extraction (Planner Node) --
     semantic_context: Optional[SemanticContext]  # WRITE-ONCE immutable context populated by Planner
                                                   # Contains: origin_station, destination_station, travel_date,
                                                   # day_mentioned, pnr_number, train_number, train_class, quota, etc.
                                                   # ALL downstream consumers treat this as read-only.
                                                   # Normalized and canonical values only.
+                                                  # DEPRECATED: Replaced by shared_context in new architecture
 
     # -- Planner Node --
     plan: List[PlanStep]                         # Ordered execution steps
