@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "bcrypt>=5.0.0",
+    "fastembed>=0.3.6",
     "fastapi>=0.111.0",
     "groq>=1.2.0",
     "langchain-core>=0.2.0",
@@ -21,4 +22,5 @@ dependencies = [
     "typing-extensions>=4.9.0",
     "uvicorn[standard]>=0.29.0",
     "pytest>=8.0.0",
+    "pypdf2>=3.0.1",
 ]

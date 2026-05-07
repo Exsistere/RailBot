@@ -10,3 +10,5 @@ wheels/
 .venv
 .vscode
 *.env
+app/services/qdrant/storage
+app/services/qdrant/.qdrant-intitialized

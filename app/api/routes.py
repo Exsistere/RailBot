@@ -106,14 +106,19 @@ def _resolve_response_type(
         pnr_result = tool_results.get("check_pnr_status", {})
         data = pnr_result.get("data") if isinstance(pnr_result, dict) else None
         if data:
-            return "PNR_STATUS", data.get("data", data)
-        return "PNR_STATUS", None
+            # check_pnr tool data shape: {ok, message, response_type, data}
+            ok = data.get("ok", True)
+            payload = data.get("data", data)
+            if ok and payload:
+                return "PNR_STATUS", payload
+            return "TEXT", None
+        return "TEXT", None
 
     if top_intent == "FAQ_RAG":
         rag_result = tool_results.get("faq_rag", {})
         data = rag_result.get("data") if isinstance(rag_result, dict) else None
         if data:
-            return "RAG_RESPONSE", data.get("data", data)
+            return "RAG_RESPONSE", {"sources": data.get("sources", [])}
         return "RAG_RESPONSE", None
 
     return "TEXT", None

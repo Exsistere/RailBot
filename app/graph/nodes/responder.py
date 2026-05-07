@@ -25,7 +25,12 @@ from typing import Any, Dict, List, Optional
 
 from app.models.state import GraphState, Intent, PlanStep
 from app.services.llm import client as llm_client
-from app.services.llm.prompts import RESPONDER_SYSTEM_PROMPT, RESPONDER_USER_PROMPT_TEMPLATE
+from app.services.llm.prompts import (
+    RESPONDER_SYSTEM_PROMPT,
+    RESPONDER_USER_PROMPT_TEMPLATE,
+    FAQ_RAG_RESPONDER_SYSTEM_PROMPT,
+    FAQ_RAG_RESPONDER_USER_PROMPT_TEMPLATE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +77,13 @@ def responder_node(state: GraphState) -> Dict:
     plan: List[PlanStep] = state.get("plan", [])
     tool_results: Dict[str, Any] = state.get("tool_results", {})
     user_query: str = state.get("user_query", "")
+
+    logger.info(
+        "Responder: top_intent=%s plan_len=%d tool_results_keys=%s",
+        top_intent,
+        len(plan),
+        list(tool_results.keys()),
+    )
 
     # ------------------------------------------------------------------
     # Branch 1: SMALL_TALK — friendly reply, no tool data
@@ -120,8 +132,21 @@ def responder_node(state: GraphState) -> Dict:
     if top_intent == "FAQ_RAG":
         rag_result = tool_results.get("faq_rag", {})
         rag_data = rag_result.get("data") if isinstance(rag_result, dict) else None
-        if rag_data and rag_data.get("message"):
-            return {"final_response": rag_data.get("message")}
+        logger.info(
+            "Responder: FAQ_RAG tool data present=%s",
+            bool(rag_data),
+        )
+        if rag_data:
+            inner_data = rag_data.get("data", {})
+            chunks = inner_data.get("chunks", [])
+            logger.info(
+                "Responder: FAQ_RAG chunks=%d sample=%r",
+                len(chunks),
+                chunks[0].get("text", "")[:200] if chunks else "",
+            )
+            response = _format_faq_rag_response(user_query, chunks)
+            logger.info("Responder: FAQ_RAG final_response=%r", response)
+            return {"final_response": response}
 
     # ------------------------------------------------------------------
     # Branch 4: Happy path — format tool results using LLM
@@ -242,3 +267,72 @@ def _fallback_format(tool_results: Dict[str, Any]) -> str:
         return "\n".join(summaries)
 
     return "I couldn't find any information matching your query. Please try again."
+
+
+def _format_faq_rag_response(user_query: str, chunks: List[Dict[str, Any]]) -> str:
+    """
+    Generate grounded FAQ answer from retrieved chunks.
+    """
+    if not chunks:
+        return "I don't have that knowledge in my internal FAQ index yet."
+    retrieved_context = "\n\n".join(
+        [
+            f"- Source: {c.get('source', 'internal_faq')}\n  Content: {c.get('text', '')}"
+            for c in chunks
+            if c.get("text")
+        ]
+    )
+    if not retrieved_context.strip():
+        return "I don't have that knowledge in my internal FAQ index yet."
+    try:
+        prompt = FAQ_RAG_RESPONDER_USER_PROMPT_TEMPLATE.format(
+            query=user_query,
+            retrieved_chunks=retrieved_context,
+        )
+        logger.info(
+            "Responder: FAQ_RAG prompt built with %d chunks; sample context=%r",
+            len(chunks),
+            retrieved_context[:300],
+        )
+        logger.info("Responder: FAQ_RAG full prompt length=%d", len(prompt))
+        logger.debug("Responder: FAQ_RAG full prompt: %s", prompt)
+        response = llm_client.generate_text(
+            prompt=prompt,
+            system_prompt=FAQ_RAG_RESPONDER_SYSTEM_PROMPT,
+        )
+        response = (response or "").strip()
+        no_knowledge_phrase = "i don't have that knowledge in my internal faq index yet"
+        if response and len(response) > 10 and no_knowledge_phrase not in response.lower():
+            return response
+
+        logger.warning(
+            "Responder: FAQ_RAG LLM returned empty/short/no-knowledge response — using chunk fallback"
+        )
+        logger.debug("Responder: FAQ_RAG prompt: %s", prompt)
+        logger.debug("Responder: FAQ_RAG response: %r", response)
+        return _fallback_faq_rag_response(chunks)
+    except Exception as exc:
+        logger.error("Responder: FAQ_RAG response generation failed: %s", exc)
+        return _fallback_faq_rag_response(chunks)
+
+
+def _fallback_faq_rag_response(chunks: List[Dict[str, Any]]) -> str:
+    """Fallback response when FAQ RAG LLM generation fails or returns nothing."""
+    if not chunks:
+        return "I don't have that knowledge in my internal FAQ index yet."
+
+    bullet_lines = []
+    for chunk in chunks[:3]:
+        text = chunk.get("text", "").strip()
+        if not text:
+            continue
+        source = chunk.get("source", "internal_faq")
+        snippet = text.replace("\n", " ")
+        if len(snippet) > 200:
+            snippet = snippet[:197].rstrip() + "..."
+        bullet_lines.append(f"- ({source}) {snippet}")
+
+    if not bullet_lines:
+        return "I don't have that knowledge in my internal FAQ index yet."
+
+    return "I found relevant information in the FAQ content:\n" + "\n".join(bullet_lines)
