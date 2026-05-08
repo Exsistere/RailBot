@@ -114,3 +114,40 @@ class ConversationService:
             )
         except Exception as exc:
             logger.error("ConversationService.save_turn failed (suppressed): %s", exc)
+
+    def list_for_user(self, user_id: str, limit: int = 20) -> List[Dict[str, Any]]:
+        """
+        Fetch all conversations for a user, newest first.
+
+        Used by frontend to populate sidebar conversation list.
+
+        Returns:
+            List of {"id": ..., "user_id": ..., "created_at": ...} dicts
+            Returns [] if DB unavailable or no conversations exist.
+        """
+        conversations = self._conv_repo.list_for_user(user_id, limit=limit)
+        logger.debug(
+            "ConversationService: listed %d conversations for user %s",
+            len(conversations), user_id,
+        )
+        return conversations
+
+    def load_all_messages(self, conversation_id: str) -> List[Dict[str, Any]]:
+        """
+        Fetch ALL messages for a conversation, oldest-first.
+
+        Used by frontend to load full conversation history when switching conversations.
+        No artificial limit.
+
+        Returns:
+            List of {"role": ..., "content": ..., "created_at": ...} dicts,
+            ordered chronologically (oldest first)
+            Returns [] if DB unavailable or no messages exist.
+        """
+        # Use very high limit to fetch all messages
+        messages = self._msg_repo.get_recent(conversation_id, limit=999999)
+        logger.debug(
+            "ConversationService: loaded %d messages for conversation %s",
+            len(messages), conversation_id,
+        )
+        return messages

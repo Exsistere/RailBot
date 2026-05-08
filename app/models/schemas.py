@@ -94,3 +94,37 @@ class PNRStatusResponse(BaseModel):
     pnr: str = ""
     status: str = ""
     detail: dict = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Conversation & Message History Schemas (Frontend Sidebar)
+# ---------------------------------------------------------------------------
+
+class ConversationItem(BaseModel):
+    """A single conversation in the sidebar list."""
+    id: str = Field(..., description="Conversation UUID")
+    created_at: str = Field(..., description="ISO timestamp of conversation creation")
+
+
+class ConversationListResponse(BaseModel):
+    """Response for GET /conversations."""
+    conversations: list[ConversationItem] = Field(
+        default_factory=list,
+        description="List of user's conversations, newest first",
+    )
+
+
+class MessageItem(BaseModel):
+    """A single message in conversation history."""
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., description="Message text")
+    created_at: str = Field(..., description="ISO timestamp of message creation")
+
+
+class ConversationMessagesResponse(BaseModel):
+    """Response for GET /conversations/{conversation_id}/messages."""
+    conversation_id: str = Field(..., description="Conversation UUID")
+    messages: list[MessageItem] = Field(
+        default_factory=list,
+        description="All messages in this conversation, oldest first",
+    )
