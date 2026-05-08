@@ -1,0 +1,13 @@
+.venv
+__pycache__
+*.pyc
+.env
+.env.example
+.git
+logs
+*.md
+*.txt
+/app/services/qdrant/storage
+/app/services/qdrant/snapshots
+/app/services/qdrant/qdrant.exe
+/app/services/qdrant/.qdrant-initialized

@@ -24,3 +24,8 @@ dependencies = [
     "pytest>=8.0.0",
     "pypdf2>=3.0.1",
 ]
+
+[tool.uv.workspace]
+members = [
+    "frontend",
+]

@@ -12,16 +12,18 @@ Dispatches rendering based on response_type from backend:
 
 Run with:  streamlit run frontend/app.py
 """
-
+import os
 import streamlit as st
 import requests
 from datetime import datetime
+from dotenv import load_dotenv
 
+load_dotenv()
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 AUTH_REGISTER = f"{API_BASE_URL}/auth/register"
 AUTH_LOGIN    = f"{API_BASE_URL}/auth/login"
 QUERY_URL     = f"{API_BASE_URL}/api/v1/query"
