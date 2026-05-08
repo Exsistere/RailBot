@@ -25,6 +25,7 @@ API_BASE_URL = "http://localhost:8000"
 AUTH_REGISTER = f"{API_BASE_URL}/auth/register"
 AUTH_LOGIN    = f"{API_BASE_URL}/auth/login"
 QUERY_URL     = f"{API_BASE_URL}/api/v1/query"
+CONVERSATIONS_URL = f"{API_BASE_URL}/api/v1/conversations"
 
 # ---------------------------------------------------------------------------
 # Page config
@@ -34,7 +35,7 @@ st.set_page_config(
     page_title="RailYatri — AI Railway Assistant",
     page_icon="🚆",
     layout="centered",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 # ---------------------------------------------------------------------------
@@ -203,6 +204,25 @@ html, body, .stApp {
 /* Hide Streamlit chrome */
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding-top: 1rem; }
+
+/* ── Sidebar styling ─────────────────────────────────────────────── */
+[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #141720 0%, #0f1117 100%);
+    border-right: 1px solid #2d3148;
+}
+
+.sidebar-button {
+    border-radius: 8px;
+    font-size: 0.88rem;
+    margin-bottom: 0.4rem;
+    transition: all 0.2s ease;
+}
+
+.stButton > button[kind="primary"] {
+    background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+    color: white;
+    border: none;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -210,10 +230,12 @@ html, body, .stApp {
 # Session state defaults
 # ---------------------------------------------------------------------------
 
-if "token"      not in st.session_state: st.session_state.token      = None
-if "user_email" not in st.session_state: st.session_state.user_email = None
-if "messages"   not in st.session_state: st.session_state.messages   = []
-if "auth_page"  not in st.session_state: st.session_state.auth_page  = "login"
+if "token"             not in st.session_state: st.session_state.token             = None
+if "user_email"        not in st.session_state: st.session_state.user_email        = None
+if "conversation_id"   not in st.session_state: st.session_state.conversation_id   = None
+if "conversations"     not in st.session_state: st.session_state.conversations     = []
+if "messages"          not in st.session_state: st.session_state.messages          = []
+if "auth_page"         not in st.session_state: st.session_state.auth_page         = "login"
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +249,21 @@ def api_register(email: str, password: str) -> dict:
 
 def api_login(email: str, password: str) -> dict:
     resp = requests.post(AUTH_LOGIN, json={"email": email, "password": password}, timeout=15)
+    return {"status": resp.status_code, "data": resp.json()}
+
+
+def api_list_conversations(token: str) -> dict:
+    """Fetch all conversations for the authenticated user."""
+    headers = {"Authorization": f"Bearer {token}"}
+    resp = requests.get(f"{API_BASE_URL}/api/v1/conversations", headers=headers, timeout=15)
+    return {"status": resp.status_code, "data": resp.json()}
+
+
+def api_get_conversation_messages(conversation_id: str, token: str) -> dict:
+    """Fetch all messages for a specific conversation."""
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"{API_BASE_URL}/api/v1/conversations/{conversation_id}/messages"
+    resp = requests.get(url, headers=headers, timeout=15)
     return {"status": resp.status_code, "data": resp.json()}
 
 
@@ -472,8 +509,105 @@ def _render_register() -> None:
 # Chat UI
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Chat UI
+# ---------------------------------------------------------------------------
+
+def format_timestamp(ts_str: str) -> str:
+    """Format ISO timestamp for display."""
+    try:
+        # Parse ISO timestamp
+        if "T" in ts_str:
+            date_part = ts_str.split("T")[0]
+            return date_part
+        return ts_str[:10]
+    except:
+        return ts_str
+
+
+def load_conversations() -> None:
+    """Fetch conversations from backend and populate session state."""
+    if not st.session_state.token:
+        return
+    try:
+        result = api_list_conversations(st.session_state.token)
+        if result["status"] == 200:
+            st.session_state.conversations = result["data"].get("conversations", [])
+        else:
+            st.session_state.conversations = []
+    except Exception:
+        st.session_state.conversations = []
+
+
+def load_conversation_messages(conversation_id: str) -> list:
+    """Fetch all messages for a conversation."""
+    if not st.session_state.token or not conversation_id:
+        return []
+    try:
+        result = api_get_conversation_messages(conversation_id, st.session_state.token)
+        if result["status"] == 200:
+            messages = result["data"].get("messages", [])
+            return [
+                {
+                    "role": m["role"],
+                    "content": m["content"],
+                    "response_type": "TEXT",  # Default; would need more data for structured types
+                    "data": None,
+                }
+                for m in messages
+            ]
+        return []
+    except Exception:
+        return []
+
+
+def render_conversation_sidebar() -> None:
+    """Render sidebar with conversation list."""
+    with st.sidebar:
+        st.markdown("### 💬 Conversations")
+        
+        # Refresh button
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            st.markdown("*Recent chats*", help="Your conversation history")
+        with col2:
+            if st.button("↻", key="refresh_convs", help="Reload conversations"):
+                load_conversations()
+                st.rerun()
+
+        st.divider()
+
+        if not st.session_state.conversations:
+            st.markdown("*No conversations yet*", help="Start chatting to create one")
+        else:
+            for conv in st.session_state.conversations:
+                conv_id = conv["id"]
+                created = format_timestamp(conv["created_at"])
+                is_active = conv_id == st.session_state.conversation_id
+
+                # Highlight active conversation
+                if is_active:
+                    btn_style = "primary"
+                    label = f"⭐ {created}"
+                else:
+                    btn_style = "secondary"
+                    label = f"💬 {created}"
+
+                if st.button(label, key=f"conv_{conv_id}", use_container_width=True, type=btn_style):
+                    st.session_state.conversation_id = conv_id
+                    st.session_state.messages = load_conversation_messages(conv_id)
+                    st.rerun()
+
+
 def render_chat() -> None:
-    # Header
+    # Load conversations if not already loaded (only on first render)
+    if not st.session_state.conversations and st.session_state.token:
+        load_conversations()
+
+    # Render sidebar
+    render_conversation_sidebar()
+
+    # Main chat area (use full width since sidebar is handled)
     st.markdown("""
     <div class="ry-header">
         <h1>🚆 RailYatri</h1>
@@ -491,9 +625,11 @@ def render_chat() -> None:
         )
     with col2:
         if st.button("Logout", key="logout_btn", use_container_width=True):
-            st.session_state.token      = None
-            st.session_state.user_email = None
-            st.session_state.messages   = []
+            st.session_state.token            = None
+            st.session_state.user_email       = None
+            st.session_state.conversation_id  = None
+            st.session_state.conversations    = []
+            st.session_state.messages         = []
             st.rerun()
 
     st.markdown('<hr class="ry-divider">', unsafe_allow_html=True)
@@ -548,6 +684,9 @@ def render_chat() -> None:
                         "response_type": response_type,
                         "data":          data,
                     })
+
+                    # Refresh conversations to show the latest one (or current one updated)
+                    load_conversations()
 
                 elif result["status"] == 401:
                     st.error("🔒 Session expired. Please log in again.")

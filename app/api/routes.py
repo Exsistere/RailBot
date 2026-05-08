@@ -28,7 +28,14 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import get_current_user
-from app.models.schemas import QueryRequest, QueryResponse
+from app.models.schemas import (
+    QueryRequest,
+    QueryResponse,
+    ConversationListResponse,
+    ConversationMessagesResponse,
+    ConversationItem,
+    MessageItem,
+)
 from app.models.state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -228,4 +235,95 @@ def query(
         message=final_response,
         response_type=response_type,
         data=data,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /conversations — fetch all conversations for authenticated user
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/conversations",
+    response_model=ConversationListResponse,
+    summary="List all conversations for the authenticated user",
+    description="Returns a list of the user's conversations, sorted by creation date (newest first).",
+)
+def list_conversations(user_id: str = Depends(get_current_user)):
+    """
+    Fetch all conversations belonging to the authenticated user.
+
+    Used by frontend to populate the conversation sidebar.
+    Returns metadata only (id, created_at) — not message content.
+    """
+    logger.debug("GET /conversations | user_id=%s", user_id)
+
+    conv_service = _conversation_service_instance()
+    conversations = conv_service.list_for_user(user_id, limit=50)
+
+    items = [
+        ConversationItem(
+            id=str(c["id"]),
+            created_at=str(c["created_at"]),
+        )
+        for c in conversations
+    ]
+
+    return ConversationListResponse(conversations=items)
+
+
+# ---------------------------------------------------------------------------
+# GET /conversations/{conversation_id}/messages — fetch all messages in conversation
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/conversations/{conversation_id}/messages",
+    response_model=ConversationMessagesResponse,
+    summary="Load full message history for a conversation",
+    description=(
+        "Returns all messages in a conversation, ordered chronologically (oldest first). "
+        "Access is scoped to the authenticated user's own conversations."
+    ),
+)
+def get_conversation_messages(
+    conversation_id: str,
+    user_id: str = Depends(get_current_user),
+):
+    """
+    Fetch all messages for a specific conversation.
+
+    Access control: Only return if conversation belongs to authenticated user.
+    Used by frontend to populate chat window when switching conversations.
+
+    Returns:
+        ConversationMessagesResponse with all messages, oldest-first.
+    """
+    logger.debug(
+        "GET /conversations/%s/messages | user_id=%s",
+        conversation_id, user_id,
+    )
+
+    conv_service = _conversation_service_instance()
+
+    # Access control: verify this conversation belongs to the user
+    conv = conv_service._conv_repo.get_by_id(conversation_id)
+    if not conv or str(conv.get("user_id")) != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied to this conversation.",
+        )
+
+    messages = conv_service.load_all_messages(conversation_id)
+
+    items = [
+        MessageItem(
+            role=m["role"],
+            content=m["content"],
+            created_at=m["created_at"],
+        )
+        for m in messages
+    ]
+
+    return ConversationMessagesResponse(
+        conversation_id=conversation_id,
+        messages=items,
     )
